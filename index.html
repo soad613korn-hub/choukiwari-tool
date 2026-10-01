@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>長期割比較ツール</title>
+<style>
+:root {
+  --primary:#1E3A8A; --primary-dark:#0F1F3D; --primary-bg:rgba(30,58,138,0.04);
+  --primary-border:rgba(30,58,138,0.12); --primary-muted:rgba(30,58,138,0.45);
+  --text:#111827; --text-sub:#6B7280;
+  --font:"Noto Sans JP","Hiragino Sans","Yu Gothic UI",sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:var(--font); font-size:13px; color:var(--text); background:#fff; padding:28px 36px; max-width:860px; margin:0 auto; line-height:1.6; }
+h1 { font-size:17px; font-weight:500; color:var(--primary-dark); margin-bottom:4px; }
+.sub { font-size:11px; color:var(--primary-muted); margin-bottom:16px; }
+.form { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+.field { background:var(--primary-bg); border-radius:10px; padding:11px 12px; }
+.field label { display:block; font-size:10px; color:var(--primary-muted); font-weight:500; margin-bottom:5px; }
+.field input, .field select { width:100%; font:inherit; font-size:15px; padding:6px 8px; border:0.5px solid var(--primary-border); border-radius:6px; background:#fff; }
+.field .unit { font-size:10px; color:var(--text-sub); margin-top:3px; }
+.actions { display:flex; gap:10px; align-items:center; margin-bottom:14px; }
+button { font:inherit; font-size:13px; padding:9px 20px; border:0; border-radius:8px; background:var(--primary); color:#fff; cursor:pointer; }
+button:hover { background:#1D4ED8; }
+.hint { font-size:11px; color:var(--text-sub); }
+.preview { text-align:center; }
+canvas { width:100%; max-width:540px; height:auto; border:0.5px solid var(--primary-border); border-radius:6px; }
+@media (max-width:640px) { .form { grid-template-columns:1fr 1fr; } }
+</style>
+</head>
+<body>
+<h1>長期割比較ツール</h1>
+<div class="sub">「5年満了まで待つ」と「今切り替える」の差を、お客様向け画像(JPEG)にします</div>
+
+<div class="form">
+  <div class="field"><label>現契約の電力会社</label>
+    <select id="company"><option>ハルエネ</option><option>エネパル</option><option>エコログ</option></select></div>
+  <div class="field"><label>毎月の削減額(試算)</label>
+    <input id="saving" type="number" min="0" step="1" value="8000"><div class="unit">円 / 月</div></div>
+  <div class="field"><label>5年満了までの残り期間</label>
+    <input id="months" type="number" min="1" step="1" value="30"><div class="unit">ヶ月</div></div>
+  <div class="field"><label>長期割の請求額(実額)</label>
+    <input id="claim" type="number" min="0" step="1" value="120000"><div class="unit">円</div></div>
+</div>
+
+<div class="actions">
+  <button id="save">JPEGで保存</button>
+  <span class="hint">1080×1350。LINE・メール添付用</span>
+</div>
+
+<div class="preview"><canvas id="cv" width="1080" height="1350"></canvas></div>
+
+<script>
+const W = 1080, H = 1350;
+const C = { primary:'#1E3A8A', dark:'#0F1F3D', muted:'#6E7FB0', bg:'#EEF1F8', border:'#D3DAEC',
+            text:'#111827', sub:'#6B7280', ok:'#15803D', okBg:'#E3F4E9', warn:'#8A6A10', warnBg:'#FBF1D3' };
+const FONT = '"Noto Sans JP","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif';
+const yen = n => Math.round(n).toLocaleString('ja-JP') + '円';
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+
+function rr(x, y, w, h, r, fill, stroke) {
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke(); }
+}
+function txt(s, x, y, size, color, weight = 400, align = 'left') {
+  ctx.font = `${weight} ${size}px ${FONT}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(s, x, y);
+}
+function wrap(s, x, y, maxW, size, color, lh, weight = 400) {
+  ctx.font = `${weight} ${size}px ${FONT}`; ctx.fillStyle = color; ctx.textAlign = 'left';
+  let line = '';
+  for (const ch of s) {
+    if (ctx.measureText(line + ch).width > maxW) { ctx.fillText(line, x, y); y += lh; line = ch; }
+    else line += ch;
+  }
+  if (line) { ctx.fillText(line, x, y); y += lh; }
+  return y;
+}
+
+function draw() {
+  const company = document.getElementById('company').value;
+  const S = Math.max(0, +document.getElementById('saving').value || 0);
+  const N = Math.max(1, Math.round(+document.getElementById('months').value || 1));
+  const K = Math.max(0, +document.getElementById('claim').value || 0);
+  const gain = S * N, net = gain - K;
+  const be = S > 0 ? K / S : Infinity;
+  const switchNow = net > 0;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = C.primary; ctx.fillRect(0, 0, W, 205);
+  txt('電気料金のご説明', 60, 62, 28, '#C9D4F2', 500);
+  txt('長期割は「電気代の後払い」です', 60, 125, 52, '#fff', 700);
+  txt('現契約:' + company, 60, 178, 26, '#C9D4F2', 500);
+
+  rr(60, 232, 960, 176, 18, C.bg);
+  let y = wrap('契約時に「基本料金が無料」だった分は、5年以内に解約すると最後にまとめて請求される"後払い"です。', 90, 285, 900, 30, C.text, 44);
+  txt('すでに受け取った値引きの精算であり、新たな損失ではありません。', 90, y + 6, 27, C.primary, 700);
+
+  txt('「満了まで待つ」と「今切り替える」の比較', 60, 465, 34, C.dark, 700);
+
+  rr(60, 490, 468, 290, 18, '#fff', C.border);
+  txt('A  5年満了まで待つ', 90, 545, 32, C.dark, 700);
+  txt('毎月の電気代', 90, 610, 25, C.sub);
+  txt('今のまま', 90, 650, 38, C.text, 700);
+  txt('長期割の精算', 90, 715, 25, C.sub);
+  txt('なし', 90, 755, 38, C.text, 700);
+
+  rr(552, 490, 468, 290, 18, C.okBg, C.ok);
+  txt('B  今切り替える', 582, 545, 32, C.ok, 700);
+  txt('残り' + N + 'ヶ月の電気代削減', 582, 610, 25, C.sub);
+  txt('−' + yen(gain), 582, 650, 38, C.ok, 700);
+  txt('長期割の精算(実額)', 582, 715, 25, C.sub);
+  txt(yen(K), 582, 755, 38, C.text, 700);
+
+  const resBg = switchNow ? C.primary : C.warnBg;
+  const resFg = switchNow ? '#fff' : C.warn;
+  rr(60, 810, 960, 210, 18, resBg);
+  txt(switchNow ? '今切り替えた場合の差し引き' : '満了まで待った方が有利なケース', 90, 865, 28, switchNow ? '#C9D4F2' : C.warn, 500);
+  if (switchNow) {
+    txt('+' + yen(net), 90, 950, 80, resFg, 700);
+    txt('お得', 90 + ctx.measureText('+' + yen(net)).width + 16, 950, 38, resFg, 700);
+  } else {
+    txt('今切替だと ' + yen(Math.abs(net)) + ' のマイナス', 90, 940, 56, resFg, 700);
+  }
+  const beTxt = S > 0 ? '損益分岐 約' + (Math.ceil(be * 10) / 10) + 'ヶ月(これより残り期間が長ければ切替が有利)' : '削減額が0円のため、切替の効果は出ません';
+  txt(beTxt, 90, 1000, 24, switchNow ? '#C9D4F2' : C.warn, 400);
+
+  txt('残り期間と損益分岐のイメージ', 60, 1075, 28, C.dark, 700);
+  const bx = 60, bw = 960, by = 1100;
+  rr(bx, by, bw, 36, 18, C.bg);
+  const beRatio = Math.min(1, be / N);
+  if (S > 0) {
+    rr(bx, by, Math.max(36, bw * beRatio), 36, 18, C.warnBg);
+    if (beRatio < 1) rr(bx + bw * beRatio, by, bw * (1 - beRatio), 36, 18, C.okBg);
+    ctx.fillStyle = C.primary; ctx.fillRect(bx + Math.min(bw - 3, bw * beRatio), by - 10, 4, 56);
+  }
+  txt('今', bx, by + 82, 24, C.sub);
+  txt('5年満了(残り' + N + 'ヶ月)', bx + bw, by + 82, 24, C.sub, 400, 'right');
+  txt(S > 0 && beRatio < 1 ? '精算額を取り戻すまで' : '', bx + 8 + bw * beRatio / 2, by + 26, 20, C.warn, 500, 'center');
+  txt(S > 0 && beRatio < 1 ? 'ここからお得' : '', bx + bw * beRatio + (bw * (1 - beRatio)) / 2, by + 26, 20, C.ok, 500, 'center');
+
+  rr(60, 1215, 960, 62, 12, C.bg);
+  txt('解除料などの費用については、別途ご説明いたします。', 90, 1255, 25, C.primary, 500);
+
+  ctx.textAlign = 'left';
+  txt('※削減額は現在の単価差による試算値です。燃料費調整等の変動により、実際の金額は増減します。', 60, 1305, 20, C.sub);
+  txt('株式会社メディアパートナーズ', 1020, 1335, 22, C.sub, 500, 'right');
+}
+
+document.querySelectorAll('input,select').forEach(el => el.addEventListener('input', draw));
+document.getElementById('save').addEventListener('click', () => {
+  const a = document.createElement('a');
+  a.href = cv.toDataURL('image/jpeg', 0.92);
+  a.download = '長期割比較_' + document.getElementById('company').value + '.jpg';
+  a.click();
+});
+
+const q = new URLSearchParams(location.search);
+for (const k of ['company', 'saving', 'months', 'claim']) if (q.get(k)) document.getElementById(k).value = q.get(k);
+(document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(draw);
+draw();
+</script>
+</body>
+</html>
